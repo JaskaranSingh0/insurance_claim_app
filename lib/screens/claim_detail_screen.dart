@@ -3,6 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/claim.dart';
 import '../providers/claims_provider.dart';
+import '../services/export_service.dart';
+import '../services/print_service.dart';
+import '../utils/dialogs.dart';
 import 'claim_form_screen.dart';
 import '../widgets/bill_dialog.dart';
 import '../widgets/advance_dialog.dart';
@@ -76,9 +79,25 @@ class _ClaimDetailContentState extends State<_ClaimDetailContent>
               tooltip: 'Edit claim details',
               onPressed: () => _navigateToEdit(context),
             ),
+          // Print button
+          IconButton(
+            icon: const Icon(Icons.print),
+            tooltip: 'Print claim',
+            onPressed: () => _printClaim(context),
+          ),
           PopupMenuButton<String>(
             onSelected: (val) => _handleMenuAction(context, val),
             itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'export',
+                child: Row(
+                  children: [
+                    Icon(Icons.download, size: 18),
+                    SizedBox(width: 8),
+                    Text('Export to CSV'),
+                  ],
+                ),
+              ),
               if (claim.status == ClaimStatus.draft)
                 const PopupMenuItem(
                   value: 'delete',
@@ -459,6 +478,9 @@ class _ClaimDetailContentState extends State<_ClaimDetailContent>
 
   void _handleMenuAction(BuildContext context, String action) {
     switch (action) {
+      case 'export':
+        _exportClaim(context);
+        break;
       case 'delete':
         _showDeleteConfirmation(context);
         break;
@@ -468,36 +490,73 @@ class _ClaimDetailContentState extends State<_ClaimDetailContent>
     }
   }
 
-  void _showDeleteConfirmation(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Claim?'),
-        content: const Text(
-          'This action cannot be undone. Are you sure you want to delete this claim?',
+  void _printClaim(BuildContext context) {
+    try {
+      PrintService.printClaim(widget.claim);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Print failed: $e'),
+          backgroundColor: Colors.red,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final provider = context.read<ClaimsProvider>();
-              if (provider.deleteClaim(widget.claim.id)) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('Claim deleted')));
-              }
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      );
+    }
+  }
+
+  void _exportClaim(BuildContext context) {
+    try {
+      ExportService.exportClaimToCsv(widget.claim);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Claim exported to CSV'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showDeleteConfirmation(BuildContext context) async {
+    final confirmed = await DialogUtils.showConfirmDialog(
+      context: context,
+      title: 'Delete Claim?',
+      message:
+          'This action cannot be undone. Are you sure you want to delete this claim?',
+      confirmText: 'Delete',
+      isDangerous: true,
     );
+
+    if (confirmed) {
+      // Store the claim for potential undo
+      final deletedClaim = widget.claim;
+      final provider = context.read<ClaimsProvider>();
+
+      if (provider.deleteClaim(widget.claim.id)) {
+        Navigator.pop(context);
+
+        // Show undo option (note: undo re-adds as draft)
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Claim deleted'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'UNDO',
+              onPressed: () {
+                // Re-add the claim
+                provider.addClaim(deletedClaim);
+              },
+            ),
+          ),
+        );
+      }
+    }
   }
 
   void _changeStatus(BuildContext context, Claim claim, ClaimStatus newStatus) {
@@ -634,36 +693,29 @@ class _ClaimDetailContentState extends State<_ClaimDetailContent>
     );
   }
 
-  void _deleteBill(BuildContext context, Claim claim, Bill bill) {
-    showDialog(
+  void _deleteBill(BuildContext context, Claim claim, Bill bill) async {
+    final confirmed = await DialogUtils.showConfirmDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Bill?'),
-        content: Text(
+      title: 'Delete Bill?',
+      message:
           'Remove "${bill.description}" (${currencyFormat.format(bill.amount)})?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              context.read<ClaimsProvider>().removeBillFromClaim(
-                claim.id,
-                bill.id,
-              );
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('Bill removed')));
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      confirmText: 'Delete',
+      isDangerous: true,
     );
+
+    if (confirmed) {
+      context.read<ClaimsProvider>().removeBillFromClaim(claim.id, bill.id);
+
+      // Show undo snackbar
+      DialogUtils.showUndoSnackBar(
+        context: context,
+        message: 'Bill removed',
+        onUndo: () {
+          // Re-add the bill
+          context.read<ClaimsProvider>().addBillToClaim(claim.id, bill);
+        },
+      );
+    }
   }
 
   void _showAddAdvanceDialog(BuildContext context, Claim claim) {
@@ -680,11 +732,33 @@ class _ClaimDetailContentState extends State<_ClaimDetailContent>
     );
   }
 
-  void _deleteAdvance(BuildContext context, Claim claim, Advance advance) {
-    context.read<ClaimsProvider>().removeAdvanceFromClaim(claim.id, advance.id);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Advance removed')));
+  void _deleteAdvance(
+    BuildContext context,
+    Claim claim,
+    Advance advance,
+  ) async {
+    final confirmed = await DialogUtils.showConfirmDialog(
+      context: context,
+      title: 'Delete Advance?',
+      message: 'Remove advance of ${currencyFormat.format(advance.amount)}?',
+      confirmText: 'Delete',
+      isDangerous: true,
+    );
+
+    if (confirmed) {
+      context.read<ClaimsProvider>().removeAdvanceFromClaim(
+        claim.id,
+        advance.id,
+      );
+
+      DialogUtils.showUndoSnackBar(
+        context: context,
+        message: 'Advance removed',
+        onUndo: () {
+          context.read<ClaimsProvider>().addAdvanceToClaim(claim.id, advance);
+        },
+      );
+    }
   }
 
   void _showAddSettlementDialog(BuildContext context, Claim claim) {
@@ -723,14 +797,33 @@ class _ClaimDetailContentState extends State<_ClaimDetailContent>
     BuildContext context,
     Claim claim,
     Settlement settlement,
-  ) {
-    context.read<ClaimsProvider>().removeSettlementFromClaim(
-      claim.id,
-      settlement.id,
+  ) async {
+    final confirmed = await DialogUtils.showConfirmDialog(
+      context: context,
+      title: 'Delete Settlement?',
+      message:
+          'Remove settlement of ${currencyFormat.format(settlement.amount)}?',
+      confirmText: 'Delete',
+      isDangerous: true,
     );
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Settlement removed')));
+
+    if (confirmed) {
+      context.read<ClaimsProvider>().removeSettlementFromClaim(
+        claim.id,
+        settlement.id,
+      );
+
+      DialogUtils.showUndoSnackBar(
+        context: context,
+        message: 'Settlement removed',
+        onUndo: () {
+          context.read<ClaimsProvider>().addSettlementToClaim(
+            claim.id,
+            settlement,
+          );
+        },
+      );
+    }
   }
 }
 

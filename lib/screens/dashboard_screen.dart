@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/claim.dart';
 import '../providers/claims_provider.dart';
+import '../providers/theme_provider.dart';
+import '../services/export_service.dart';
 import 'claim_detail_screen.dart';
 import 'claim_form_screen.dart';
 
@@ -15,79 +18,410 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   ClaimStatus? _filterStatus;
+  String _searchQuery = '';
+  String _sortBy = 'date'; // 'date', 'amount', 'name'
+  bool _sortAscending = false;
+  final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
   final currencyFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹');
 
   @override
   void initState() {
     super.initState();
-    // Load sample data on first run
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ClaimsProvider>().loadSampleData();
+    // Initialize provider and load data
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final provider = context.read<ClaimsProvider>();
+      await provider.initialize();
+      // Load sample data only if no saved data exists
+      provider.loadSampleData();
     });
   }
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  // Handle keyboard shortcuts
+  void _handleKeyPress(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final isCtrl = HardwareKeyboard.instance.isControlPressed;
+
+      // Ctrl+N: New claim
+      if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyN) {
+        _navigateToCreateClaim(context);
+      }
+      // Ctrl+F: Focus search
+      else if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyF) {
+        _searchFocusNode.requestFocus();
+      }
+      // Escape: Clear search/filter
+      else if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_searchQuery.isNotEmpty || _filterStatus != null) {
+          setState(() {
+            _searchQuery = '';
+            _searchController.clear();
+            _filterStatus = null;
+          });
+        }
+      }
+    }
+  }
+
+  // Get filtered and sorted claims
+  List<Claim> _getFilteredClaims(ClaimsProvider provider) {
+    var claims = _filterStatus != null
+        ? provider.getClaimsByStatus(_filterStatus!)
+        : provider.claims.toList();
+
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      claims = claims.where((c) {
+        final query = _searchQuery.toLowerCase();
+        return c.patientName.toLowerCase().contains(query) ||
+            c.patientId.toLowerCase().contains(query) ||
+            c.insuranceProvider.toLowerCase().contains(query) ||
+            c.policyNumber.toLowerCase().contains(query) ||
+            c.diagnosis.toLowerCase().contains(query);
+      }).toList();
+    }
+
+    // Apply sorting
+    claims.sort((a, b) {
+      int result;
+      switch (_sortBy) {
+        case 'amount':
+          result = a.totalBills.compareTo(b.totalBills);
+          break;
+        case 'name':
+          result = a.patientName.toLowerCase().compareTo(
+            b.patientName.toLowerCase(),
+          );
+          break;
+        case 'date':
+        default:
+          result = a.createdAt.compareTo(b.createdAt);
+      }
+      return _sortAscending ? result : -result;
+    });
+
+    return claims;
+  }
+
+  // Handle export actions
+  void _handleExport(BuildContext context, String exportType) {
+    final provider = context.read<ClaimsProvider>();
+
+    try {
+      if (exportType == 'all_csv') {
+        if (provider.claims.isEmpty) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('No claims to export')));
+          return;
+        }
+        ExportService.exportAllClaimsToCsv(provider.claims);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All claims exported to CSV'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (exportType == 'filtered_csv') {
+        final filteredClaims = _getFilteredClaims(provider);
+        if (filteredClaims.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No claims match the current filter')),
+          );
+          return;
+        }
+        ExportService.exportAllClaimsToCsv(filteredClaims);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${filteredClaims.length} filtered claims exported to CSV',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Insurance Claims'),
-        centerTitle: false,
+    final themeProvider = context.watch<ThemeProvider>();
+
+    return KeyboardListener(
+      focusNode: FocusNode()..requestFocus(),
+      autofocus: true,
+      onKeyEvent: _handleKeyPress,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Insurance Claims'),
+          centerTitle: false,
+          actions: [
+            // Theme toggle (only show on mobile, desktop has nav rail)
+            if (MediaQuery.of(context).size.width <= 900)
+              IconButton(
+                icon: Icon(
+                  themeProvider.isDark ? Icons.light_mode : Icons.dark_mode,
+                ),
+                tooltip: 'Toggle theme',
+                onPressed: () => themeProvider.toggleTheme(),
+              ),
+            // Keyboard shortcuts help
+            IconButton(
+              icon: const Icon(Icons.keyboard),
+              tooltip:
+                  'Keyboard shortcuts:\nCtrl+N: New claim\nCtrl+F: Search\nEsc: Clear filters',
+              onPressed: () => _showShortcutsHelp(context),
+            ),
+            // Sort button
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.sort),
+              tooltip: 'Sort claims',
+              onSelected: (value) {
+                setState(() {
+                  if (_sortBy == value) {
+                    _sortAscending = !_sortAscending;
+                  } else {
+                    _sortBy = value;
+                    _sortAscending = false;
+                  }
+                });
+              },
+              itemBuilder: (ctx) => [
+                PopupMenuItem(
+                  value: 'date',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _sortBy == 'date'
+                            ? (_sortAscending
+                                  ? Icons.arrow_upward
+                                  : Icons.arrow_downward)
+                            : null,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('Date'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'name',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _sortBy == 'name'
+                            ? (_sortAscending
+                                  ? Icons.arrow_upward
+                                  : Icons.arrow_downward)
+                            : null,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('Patient Name'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'amount',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _sortBy == 'amount'
+                            ? (_sortAscending
+                                  ? Icons.arrow_upward
+                                  : Icons.arrow_downward)
+                            : null,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('Amount'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            IconButton(
+              icon: const Icon(Icons.filter_list),
+              tooltip: 'Filter claims',
+              onPressed: _showFilterDialog,
+            ),
+            // Export button
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.download),
+              tooltip: 'Export claims',
+              onSelected: (value) => _handleExport(context, value),
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(
+                  value: 'all_csv',
+                  child: Row(
+                    children: [
+                      Icon(Icons.table_chart, size: 18),
+                      SizedBox(width: 8),
+                      Text('Export All to CSV'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'filtered_csv',
+                  child: Row(
+                    children: [
+                      Icon(Icons.filter_alt, size: 18),
+                      SizedBox(width: 8),
+                      Text('Export Filtered to CSV'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        body: Consumer<ClaimsProvider>(
+          builder: (context, provider, child) {
+            // Show loading indicator while initializing
+            if (provider.isLoading) {
+              return const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Loading claims...'),
+                  ],
+                ),
+              );
+            }
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Search bar
+                  _buildSearchBar(),
+                  const SizedBox(height: 16),
+
+                  // Stats cards row
+                  _buildStatsSection(provider),
+                  const SizedBox(height: 24),
+
+                  // Status summary chips
+                  _buildStatusChips(provider),
+                  const SizedBox(height: 24),
+
+                  // Claims list header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _filterStatus != null
+                              ? '${_filterStatus!.displayName} Claims'
+                              : 'All Claims',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      if (_filterStatus != null || _searchQuery.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _filterStatus = null;
+                              _searchQuery = '';
+                              _searchController.clear();
+                            });
+                          },
+                          child: const Text('Clear all'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Claims list
+                  _buildClaimsList(provider),
+                ],
+              ),
+            );
+          },
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => _navigateToCreateClaim(context),
+          icon: const Icon(Icons.add),
+          label: const Text('New Claim'),
+        ),
+      ),
+    );
+  }
+
+  void _showShortcutsHelp(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.keyboard),
+            SizedBox(width: 8),
+            Text('Keyboard Shortcuts'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ShortcutRow(keys: 'Ctrl + N', description: 'Create new claim'),
+            SizedBox(height: 8),
+            _ShortcutRow(keys: 'Ctrl + F', description: 'Focus search bar'),
+            SizedBox(height: 8),
+            _ShortcutRow(keys: 'Esc', description: 'Clear search/filters'),
+          ],
+        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_list),
-            tooltip: 'Filter claims',
-            onPressed: _showFilterDialog,
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
           ),
         ],
       ),
-      body: Consumer<ClaimsProvider>(
-        builder: (context, provider, child) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Stats cards row
-                _buildStatsSection(provider),
-                const SizedBox(height: 24),
+    );
+  }
 
-                // Status summary chips
-                _buildStatusChips(provider),
-                const SizedBox(height: 24),
-
-                // Claims list header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      _filterStatus != null
-                          ? '${_filterStatus!.displayName} Claims'
-                          : 'All Claims',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    if (_filterStatus != null)
-                      TextButton(
-                        onPressed: () {
-                          setState(() => _filterStatus = null);
-                        },
-                        child: const Text('Clear filter'),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Claims list
-                _buildClaimsList(provider),
-              ],
-            ),
-          );
-        },
+  Widget _buildSearchBar() {
+    return TextField(
+      controller: _searchController,
+      focusNode: _searchFocusNode,
+      decoration: InputDecoration(
+        hintText: 'Search by patient, ID, insurance...',
+        prefixIcon: const Icon(Icons.search),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  setState(() {
+                    _searchQuery = '';
+                    _searchController.clear();
+                  });
+                },
+              )
+            : null,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
+        ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _navigateToCreateClaim(context),
-        icon: const Icon(Icons.add),
-        label: const Text('New Claim'),
-      ),
+      onChanged: (val) => setState(() => _searchQuery = val),
     );
   }
 
@@ -203,9 +537,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildClaimsList(ClaimsProvider provider) {
-    final claims = _filterStatus != null
-        ? provider.getClaimsByStatus(_filterStatus!)
-        : provider.claims;
+    final claims = _getFilteredClaims(provider);
 
     if (claims.isEmpty) {
       return Center(
@@ -216,14 +548,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
               const SizedBox(height: 16),
               Text(
-                _filterStatus != null
+                _searchQuery.isNotEmpty
+                    ? 'No claims matching "$_searchQuery"'
+                    : _filterStatus != null
                     ? 'No ${_filterStatus!.displayName.toLowerCase()} claims'
                     : 'No claims yet',
                 style: TextStyle(color: Colors.grey[600], fontSize: 16),
               ),
               const SizedBox(height: 8),
               Text(
-                'Click the + button to create one',
+                _searchQuery.isNotEmpty || _filterStatus != null
+                    ? 'Try adjusting your search or filters'
+                    : 'Click the + button to create one',
                 style: TextStyle(color: Colors.grey[500]),
               ),
             ],
@@ -529,6 +865,37 @@ class _AmountInfo extends StatelessWidget {
           amount,
           style: TextStyle(fontWeight: FontWeight.w600, color: color),
         ),
+      ],
+    );
+  }
+}
+
+class _ShortcutRow extends StatelessWidget {
+  final String keys;
+  final String description;
+
+  const _ShortcutRow({required this.keys, required this.description});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            keys,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Text(description),
       ],
     );
   }

@@ -67,6 +67,22 @@ class Bill {
       category: category ?? this.category,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'description': description,
+    'amount': amount,
+    'date': date.toIso8601String(),
+    'category': category,
+  };
+
+  factory Bill.fromJson(Map<String, dynamic> json) => Bill(
+    id: json['id'],
+    description: json['description'],
+    amount: (json['amount'] as num).toDouble(),
+    date: DateTime.parse(json['date']),
+    category: json['category'] ?? 'General',
+  );
 }
 
 // Advance payment model
@@ -79,6 +95,20 @@ class Advance {
   Advance({String? id, required this.amount, DateTime? date, this.notes})
     : id = id ?? const Uuid().v4(),
       date = date ?? DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'amount': amount,
+    'date': date.toIso8601String(),
+    'notes': notes,
+  };
+
+  factory Advance.fromJson(Map<String, dynamic> json) => Advance(
+    id: json['id'],
+    amount: (json['amount'] as num).toDouble(),
+    date: DateTime.parse(json['date']),
+    notes: json['notes'],
+  );
 }
 
 // Settlement record model
@@ -97,6 +127,22 @@ class Settlement {
     this.notes,
   }) : id = id ?? const Uuid().v4(),
        date = date ?? DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'amount': amount,
+    'date': date.toIso8601String(),
+    'reference': reference,
+    'notes': notes,
+  };
+
+  factory Settlement.fromJson(Map<String, dynamic> json) => Settlement(
+    id: json['id'],
+    amount: (json['amount'] as num).toDouble(),
+    date: DateTime.parse(json['date']),
+    reference: json['reference'] ?? '',
+    notes: json['notes'],
+  );
 }
 
 // Main Claim model
@@ -200,4 +246,46 @@ class Claim {
       notes: notes ?? this.notes,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'patientName': patientName,
+    'patientId': patientId,
+    'insuranceProvider': insuranceProvider,
+    'policyNumber': policyNumber,
+    'admissionDate': admissionDate.toIso8601String(),
+    'dischargeDate': dischargeDate?.toIso8601String(),
+    'diagnosis': diagnosis,
+    'status': status.index,
+    'bills': bills.map((b) => b.toJson()).toList(),
+    'advances': advances.map((a) => a.toJson()).toList(),
+    'settlements': settlements.map((s) => s.toJson()).toList(),
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'notes': notes,
+  };
+
+  factory Claim.fromJson(Map<String, dynamic> json) => Claim(
+    id: json['id'],
+    patientName: json['patientName'],
+    patientId: json['patientId'],
+    insuranceProvider: json['insuranceProvider'],
+    policyNumber: json['policyNumber'],
+    admissionDate: DateTime.parse(json['admissionDate']),
+    dischargeDate: json['dischargeDate'] != null
+        ? DateTime.parse(json['dischargeDate'])
+        : null,
+    diagnosis: json['diagnosis'],
+    status: ClaimStatus.values[json['status']],
+    bills: (json['bills'] as List).map((b) => Bill.fromJson(b)).toList(),
+    advances: (json['advances'] as List)
+        .map((a) => Advance.fromJson(a))
+        .toList(),
+    settlements: (json['settlements'] as List)
+        .map((s) => Settlement.fromJson(s))
+        .toList(),
+    createdAt: DateTime.parse(json['createdAt']),
+    updatedAt: DateTime.parse(json['updatedAt']),
+    notes: json['notes'],
+  );
 }

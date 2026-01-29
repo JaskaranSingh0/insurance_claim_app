@@ -1,8 +1,15 @@
 import 'package:flutter/foundation.dart';
 import '../models/claim.dart';
+import '../services/storage_service.dart';
 
 class ClaimsProvider extends ChangeNotifier {
   final List<Claim> _claims = [];
+  final StorageService _storage = StorageService();
+  bool _isLoading = false;
+  bool _isInitialized = false;
+
+  bool get isLoading => _isLoading;
+  bool get isInitialized => _isInitialized;
 
   // Getter for all claims
   List<Claim> get claims => List.unmodifiable(_claims);
@@ -21,10 +28,33 @@ class ClaimsProvider extends ChangeNotifier {
     }
   }
 
+  // Initialize and load data from storage
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+
+    _isLoading = true;
+    notifyListeners();
+
+    final savedClaims = await _storage.loadClaims();
+    if (savedClaims.isNotEmpty) {
+      _claims.addAll(savedClaims);
+    }
+
+    _isLoading = false;
+    _isInitialized = true;
+    notifyListeners();
+  }
+
+  // Save to storage after any change
+  Future<void> _saveToStorage() async {
+    await _storage.saveClaims(_claims);
+  }
+
   // Add a new claim
   void addClaim(Claim claim) {
     _claims.add(claim);
     notifyListeners();
+    _saveToStorage();
   }
 
   // Update an existing claim
@@ -33,6 +63,7 @@ class ClaimsProvider extends ChangeNotifier {
     if (idx != -1) {
       _claims[idx] = updatedClaim;
       notifyListeners();
+      _saveToStorage();
     }
   }
 
@@ -42,6 +73,7 @@ class ClaimsProvider extends ChangeNotifier {
     if (claim != null && claim.status == ClaimStatus.draft) {
       _claims.removeWhere((c) => c.id == id);
       notifyListeners();
+      _saveToStorage();
       return true;
     }
     return false;
@@ -153,7 +185,7 @@ class ClaimsProvider extends ChangeNotifier {
     );
   }
 
-  // Add some sample data for testing
+  // Load sample data if no saved data exists
   void loadSampleData() {
     if (_claims.isNotEmpty) return; // don't reload if already have data
 
@@ -235,6 +267,14 @@ class ClaimsProvider extends ChangeNotifier {
     );
 
     _claims.addAll([sampleClaim1, sampleClaim2, sampleClaim3]);
+    notifyListeners();
+    _saveToStorage(); // Save sample data to storage
+  }
+
+  // Clear all data (useful for testing)
+  Future<void> clearAllData() async {
+    _claims.clear();
+    await _storage.clearClaims();
     notifyListeners();
   }
 }
