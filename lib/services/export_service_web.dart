@@ -1,16 +1,20 @@
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
 import 'dart:convert';
+import 'dart:js_interop';
+import 'package:web/web.dart' as web;
 
 // Web implementation for file download
 void downloadFile(String filename, String content) {
   final bytes = utf8.encode(content);
-  final blob = html.Blob([bytes], 'text/csv');
-  final url = html.Url.createObjectUrlFromBlob(blob);
+  final blob = web.Blob(
+    [bytes.toJS].toJS,
+    web.BlobPropertyBag(type: 'text/csv'),
+  );
+  final url = web.URL.createObjectURL(blob);
 
-  final anchor = html.AnchorElement(href: url)
-    ..setAttribute('download', filename)
-    ..click();
+  final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
 
-  html.Url.revokeObjectUrl(url);
+  web.URL.revokeObjectURL(url);
 }

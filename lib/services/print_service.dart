@@ -3,7 +3,7 @@ import '../models/claim.dart';
 
 // Conditional import for web vs non-web
 import 'print_service_stub.dart'
-    if (dart.library.html) 'print_service_web.dart'
+    if (dart.library.js_interop) 'print_service_web.dart'
     as platform;
 
 /// Service for generating printable HTML documents

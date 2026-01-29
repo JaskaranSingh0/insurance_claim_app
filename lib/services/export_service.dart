@@ -3,7 +3,7 @@ import '../models/claim.dart';
 
 // Conditional import for web vs non-web
 import 'export_service_stub.dart'
-    if (dart.library.html) 'export_service_web.dart'
+    if (dart.library.js_interop) 'export_service_web.dart'
     as platform;
 
 class ExportService {
