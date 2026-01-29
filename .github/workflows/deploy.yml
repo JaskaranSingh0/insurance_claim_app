@@ -1,0 +1,48 @@
+name: Deploy to GitHub Pages
+
+# Trigger the workflow on push to main branch or manual dispatch
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Set permissions for GitHub token
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    name: Build and Deploy Flutter Web App
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Flutter with stable channel
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Get Flutter dependencies
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Build the Flutter web app with proper base-href for GitHub Pages
+      # The base-href must match the repository name with leading and trailing slashes
+      - name: Build web app
+        run: flutter build web --release --base-href "/insurance_claim_app/"
+
+      # Deploy to GitHub Pages using peaceiris/actions-gh-pages
+      # This will push the build/web directory to the gh-pages branch
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
+          # Optional: Add a custom commit message
+          commit_message: 'Deploy Flutter web app to GitHub Pages'
