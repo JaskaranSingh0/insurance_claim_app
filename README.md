@@ -1,6 +1,10 @@
+### I'll be honest, i am a MERN Stack Developer and I am still learning it. This was my first time with flutter/dart and its all ai.
+
 # Insurance Claim Management System.....
 
 A comprehensive Flutter application for managing hospital insurance claims. Built with modern Flutter practices, Material Design 3, and Provider state management.
+
+### I'll be honest, i am a MERN Stack Developer and I am still learning it. This was my first time with flutter/dart and its all ai.
 
 ## Features
 
@@ -107,7 +111,7 @@ The app follows a clean architecture with:
 | Shortcut | Action |
 |----------|--------|
 | Ctrl + N | Create new claim |
-| Ctrl + F | Focus search bar |
+| Ctrl + F | Focus search bar |  CAUSING PROBLEMS AS THE SAME COMMANDS OPENS CHROME'S FIND.
 | Esc | Clear search and filters |
 
 ## License
