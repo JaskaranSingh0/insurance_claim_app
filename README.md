@@ -1,6 +1,24 @@
 # insurance_claim_app
 
+[![Deploy to GitHub Pages](https://github.com/JaskaranSingh0/insurance_claim_app/actions/workflows/deploy.yml/badge.svg)](https://github.com/JaskaranSingh0/insurance_claim_app/actions/workflows/deploy.yml)
+
 A new Flutter project.
+
+## 🚀 Live Demo
+
+The app is automatically deployed to GitHub Pages: [https://jaskaransingh0.github.io/insurance_claim_app/](https://jaskaransingh0.github.io/insurance_claim_app/)
+
+## 📦 Deployment
+
+This project uses GitHub Actions to automatically deploy to GitHub Pages:
+
+- **Automatic Deployment**: Every push to the `main` branch triggers a new deployment
+- **Manual Deployment**: You can also trigger deployment manually from the Actions tab
+- **Deployment Process**:
+  1. GitHub Actions workflow builds the Flutter web app
+  2. The build output is deployed to the `gh-pages` branch
+  3. GitHub Pages serves the app from the `gh-pages` branch
+- **Workflow File**: See [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) for configuration details
 
 ## Getting Started
 
